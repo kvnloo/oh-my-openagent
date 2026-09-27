@@ -1,3 +1,16 @@
+## 2026-09-27 - omo-senpi ships desktop computer use (#8893)
+
+A new `computer-use` component registers the `computer` tool from the moved `@oh-my-opencode/senpi-desktop-*` packages:
+- It is search-exposed, so tool_search finds it for desktop tasks, and it starts nothing until it is activated.
+- It exposes a `computer` global in the eval kernels while it is active.
+- Its read and exec tiers are gated by permission rules such as `computer:exec=deny`.
+- `/computer` turns it on or off, reports status, and stops or resumes input (user-only).
+- `computer_actions` (OpenAI computer-use actions) is added when `computer.cua_adapter` is set.
+
+Settings live in a new `computer` block of the omo config: `enabled`, `display`, `max_width`, `max_height`, `screenshot_max_bytes`, `stop_hotkey`, `allow_host_relay_only_stop`, `macos_canary`, `audit_log`, `screenshot_gc`, `engine_path` and `cua_adapter`. It is native-only and included in the generated schema. The tiers and the eval global use senpi's new tool hooks (code-yeongyu/senpi#2178), and an older senpi ignores them.
+
+`scripts/qa/computer-use-e2e.mjs` proves this on the real surface with the real engine's fake desktop backend: the screenshot passes an exec deny, the click is refused before the engine, the allowed click is audited, and `eval` sees the global. The bundle budget rises to 1,420,000 bytes for this first-party code, with no new third-party dependency.
+
 ## 2026-09-27 - The desktop computer-use TypeScript packages move into omo (#8893)
 
 The five packages that sit between a harness and the `senpi-desktop-engine` binary move from senpi as private `@oh-my-opencode/senpi-desktop-*` workspaces:
