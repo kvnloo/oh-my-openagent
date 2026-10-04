@@ -6,6 +6,7 @@ import {
   SESSION_SEARCH_DESCRIPTION,
   SESSION_INFO_DESCRIPTION,
 } from "./constants"
+import { setGlobalSessionServerUrl } from "./global-session-list"
 import { getAllSessions, getMainSessions, getSessionInfo, readSessionMessages, readSessionTodos, sessionExists, setStorageClient } from "./storage"
 import {
   filterSessionsByDate,
@@ -69,6 +70,7 @@ export function createSessionManagerTools(
   }
   // Initialize storage client for SDK-based operations (beta mode)
   resolvedDeps.setStorageClient(ctx.client)
+  setGlobalSessionServerUrl(ctx.client, ctx.serverUrl)
 
   const session_list: ToolDefinition = tool({
     description: SESSION_LIST_DESCRIPTION,
@@ -115,10 +117,6 @@ export function createSessionManagerTools(
         }
 
         let messages = await resolvedDeps.readSessionMessages(args.session_id)
-
-        if (messages.length === 0) {
-          return `Session not found: ${args.session_id}`
-        }
 
         if (args.limit && args.limit > 0) {
           messages = args.from_end

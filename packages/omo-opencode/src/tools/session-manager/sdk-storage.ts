@@ -2,6 +2,7 @@ import type { PluginInput } from "@opencode-ai/plugin"
 import { normalizeSDKResponse } from "../../shared"
 import type { SessionMessage, SessionMetadata, TodoItem } from "./types"
 import { sessionDirectoriesMatch } from "./directory-filter"
+import { GlobalSessionListUnavailable, listGlobalSessions } from "./global-session-list"
 import { isSessionSdkUnavailableError } from "./sdk-unavailable"
 
 function unwrapSdkResponseError(response: unknown): unknown {
@@ -40,33 +41,69 @@ async function fetchSdkResponse(operation: () => Promise<unknown>): Promise<unkn
   throw lastError
 }
 
+function sortNewest(sessions: SessionMetadata[]): SessionMetadata[] {
+  return sessions.slice().sort((a, b) => b.time.updated - a.time.updated || b.id.localeCompare(a.id))
+}
+
+async function listScopedSessions(client: PluginInput["client"]): Promise<SessionMetadata[]> {
+  const response = await fetchSdkResponse(() => client.session.list())
+  return normalizeSDKResponse(response, [] as SessionMetadata[])
+}
+
+async function listSessions(client: PluginInput["client"], roots: boolean): Promise<SessionMetadata[]> {
+  try {
+    return await listGlobalSessions(client, { roots })
+  } catch (error) {
+    if (!(error instanceof GlobalSessionListUnavailable)) throw error
+  }
+  return listScopedSessions(client)
+}
+
 export async function getSdkMainSessions(
   client: PluginInput["client"],
   directory?: string,
 ): Promise<SessionMetadata[]> {
-  const response = await fetchSdkResponse(() => client.session.list())
-
-  const sessions = normalizeSDKResponse(response, [] as SessionMetadata[])
+  const sessions = await listSessions(client, true)
   const mainSessions = sessions.filter((session) => !session.parentID)
   if (directory) {
-    return mainSessions
-      .filter((session) => sessionDirectoriesMatch(session.directory, directory))
-      .sort((a, b) => b.time.updated - a.time.updated)
+    return sortNewest(mainSessions.filter((session) => sessionDirectoriesMatch(session.directory, directory)))
   }
 
-  return mainSessions.sort((a, b) => b.time.updated - a.time.updated)
+  return sortNewest(mainSessions)
 }
 
 export async function getSdkAllSessions(client: PluginInput["client"]): Promise<string[]> {
-  const response = await fetchSdkResponse(() => client.session.list())
-  const sessions = normalizeSDKResponse(response, [] as SessionMetadata[])
-  return sessions
-    .slice()
-    .sort((a, b) => b.time.updated - a.time.updated)
-    .map((session) => session.id)
+  const sessions = await listSessions(client, false)
+  return sortNewest(sessions).map((session) => session.id)
+}
+
+function isNotFound(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false
+  const record = error as { name?: unknown; message?: unknown; data?: { message?: unknown } }
+  const name = typeof record.name === "string" ? record.name : ""
+  const message = typeof record.message === "string"
+    ? record.message
+    : typeof record.data?.message === "string"
+      ? record.data.message
+      : ""
+  return name === "NotFoundError" || message.toLowerCase().includes("session not found")
 }
 
 export async function sdkSessionExists(client: PluginInput["client"], sessionID: string): Promise<boolean> {
+  const get = client.session.get
+  if (typeof get === "function") {
+    try {
+      const response = await fetchSdkResponse(() => get({ path: { id: sessionID } }))
+      const session = normalizeSDKResponse(response, null as { id?: string } | null, {
+        preferResponseOnMissingData: true,
+      })
+      return typeof session?.id === "string"
+    } catch (error) {
+      if (isNotFound(error)) return false
+      throw error
+    }
+  }
+
   const messages = await getSdkSessionMessages(client, sessionID)
   return messages.length > 0
 }
